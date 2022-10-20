@@ -1,6 +1,6 @@
 # When and how to rely on retrieval in the <i>k</i>NN-LM
 
-Code to be provided closer to the conference data. In the meantime, please email adrozdov@cs.umass.edu for any questions.
+Code to be provided closer to the conference date. In the meantime, please email adrozdov@cs.umass.edu for any questions.
 
 ## Citation
 
