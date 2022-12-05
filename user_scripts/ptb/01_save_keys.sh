@@ -2,7 +2,7 @@ CHECKPOINT=ckpt/auto-ptb-run-4/checkpoint_best.pt
 DSTORE_DIR=./work_data/ptb.train
 MAX_TOK=512
 MAX_WIN=256
-DSTORE_SIZE=1001735
+DSTORE_SIZE=1003610
 
 mkdir -p $DSTORE_DIR
 

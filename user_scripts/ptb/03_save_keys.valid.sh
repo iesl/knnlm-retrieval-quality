@@ -1,8 +1,8 @@
 CHECKPOINT=ckpt/auto-ptb-run-4/checkpoint_best.pt
 DSTORE_DIR=./work_data/ptb.train
-DSTORE_SIZE=1001735
+DSTORE_SIZE=1003610
 EVAL_DSTORE_DIR=./work_data/ptb.valid
-EVAL_DSTORE_SIZE=42272
+EVAL_DSTORE_SIZE=42355
 MAX_TOK=512
 MAX_WIN=256
 
