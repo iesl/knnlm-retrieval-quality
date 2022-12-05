@@ -6,6 +6,7 @@ import time
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--write-interval', type=int, default=1000000)
 parser.add_argument('--dstore_mmap', type=str, help='memmap where keys and vals are stored')
 parser.add_argument('--dstore_size', type=int, help='number of items saved in the datastore memmap')
 parser.add_argument('--dimension', type=int, default=1024, help='Size of each key')
@@ -24,7 +25,7 @@ print(args)
 
 if args.dstore_fp16:
     keys = np.memmap(args.dstore_mmap+'_keys.npy', dtype=np.float16, mode='r', shape=(args.dstore_size, args.dimension))
-    vals = np.memmap(args.dstore_mmap+'_vals.npy', dtype=np.int16, mode='r', shape=(args.dstore_size, 1))
+    vals = np.memmap(args.dstore_mmap+'_vals.npy', dtype=np.int32, mode='r', shape=(args.dstore_size, 1))
 else:
     keys = np.memmap(args.dstore_mmap+'_keys.npy', dtype=np.float32, mode='r', shape=(args.dstore_size, args.dimension))
     vals = np.memmap(args.dstore_mmap+'_vals.npy', dtype=np.int, mode='r', shape=(args.dstore_size, 1))
@@ -59,7 +60,7 @@ while start < args.dstore_size:
     index.add_with_ids(to_add.astype(np.float32), np.arange(start, end))
     start += args.num_keys_to_add_at_a_time
 
-    if (start % 1000000) == 0:
+    if (start % args.write_interval) == 0:
         print('Added %d tokens so far' % start)
         print('Writing Index', start)
         faiss.write_index(index, args.faiss_index)

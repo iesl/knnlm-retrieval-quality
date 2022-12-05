@@ -133,6 +133,13 @@ class SequenceScorer(object):
             # remove padding from ref
             ref = utils.strip_pad(sample['target'][i, start_idxs[i]:], self.pad) \
                 if sample['target'] is not None else None
+            # Choose keys not associated with padding. Useful if the last batch has excessive padding.
+            dstore_keys = None
+            if self.args.save_knnlm_dstore:
+                mask = sample['target'][i, start_idxs[i]:] != self.pad
+                dstore_keys = decoder_out[1][self.args.knn_keytype][start_idxs[i]:,i,:] if self.args.save_knnlm_dstore else None
+                dstore_keys = dstore_keys[mask]
+
             tgt_len = ref.numel()
             avg_probs_i = avg_probs[i][start_idxs[i]:start_idxs[i] + tgt_len]
             score_i = avg_probs_i.sum() / tgt_len
@@ -156,6 +163,6 @@ class SequenceScorer(object):
                 'attention': avg_attn_i,
                 'alignment': alignment,
                 'positional_scores': avg_probs_i,
-                'dstore_keys': decoder_out[1][self.args.knn_keytype][start_idxs[i]:,i,:] if self.args.save_knnlm_dstore else None,
+                'dstore_keys': dstore_keys,
             }])
         return hypos

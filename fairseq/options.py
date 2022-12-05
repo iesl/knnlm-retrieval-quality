@@ -491,6 +491,8 @@ def add_eval_lm_args(parser):
                        help='save keys for the knnlm datastore')
     group.add_argument('--dstore-mmap', default=None, type=str,
                        help='If saving knnlm dstore, save keys and values to this file')
+    group.add_argument('--no-min-context', action='store_true',
+                       help='Useful for shorter evaluation text.')
     # fmt: on
 
 
