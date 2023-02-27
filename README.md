@@ -1,3 +1,37 @@
+# You can't pick your neighbors, or can you? When and how to rely on retrieval in the kNN-LM
+
+This repository is an optimized version of [urvashik/knnlm](https://github.com/urvashik/knnlm) and includes script to reproduce experiments from our [EMNLP 2022 Findings](https://arxiv.org/abs/2210.15859) paper.
+
+```
+@inproceedings{drozdov2022knnlm,
+    title = "You can't pick your neighbors, or can you? {W}hen and how to rely on retrieval in the {kNN-LM}",
+    author = "Andrew Drozdov and Shufan Wang and Razieh Rahimi and Andrew McCallum and Hamed Zamani and Mohit Iyyer",
+    booktitle = "Findings of the Association for Computational Linguistics: EMNLP 2022",
+    year = "2022"
+}
+```
+
+This code is based on the original kNN-LM repo: https://github.com/urvashik/knnlm
+
+```
+@inproceedings{khandelwal20generalization,
+  title={{Generalization through Memorization: Nearest Neighbor Language Models}},
+  author={Khandelwal, Urvashi and Levy, Omer and Jurafsky, Dan and Zettlemoyer, Luke and Lewis, Mike},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2020}
+}
+```
+
+## Install Dependencies
+
+```bash
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge -y
+pip install --editable .
+pip install faiss-cpu
+```
+
+---
+
 # Nearest Neighbor Language Models
 
 This repository is a fork of the [Fairseq](https://github.com/pytorch/fairseq) repository and the exact commit that this code is based on can be found [here](https://github.com/pytorch/fairseq/tree/6a5181509aa1fa7d260985157e77211753da544b). Please use the exact commit page to determine software requirements for using this code. This README will be updated once the code has been merged into Fairseq.
@@ -18,13 +52,12 @@ Note that the code for kNN-MT is not yet available. I've just graduated (yay!) a
 __Edit__: An early release of the code has been made available [here](https://github.com/urvashik/knnmt).
 
 
-## Wikitext-103 Experiments
+## Install Dependencies
 
-Before starting, make sure you install Fairseq (after pulling the code, from the project directory) and [FAISS](https://github.com/facebookresearch/faiss/wiki):
 ```bash
+conda install pytorch==1.10.1 torchvision==0.11.2 torchaudio==0.10.1 cudatoolkit=11.3 -c pytorch -c conda-forge -y
 pip install --editable .
-
-pip install faiss
+pip install faiss-cpu
 ```
 
 ### A Note about Hardware

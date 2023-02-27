@@ -1,3 +1,12 @@
+"""
+Basic Instructions:
+
+  1. Cache the approximate retrieval. `python rq/fast_evaluate.py --preset wiki_valid --save-knns`
+  2. Cache the exact vector distance. `python rq/fast_evaluate.py --preset wiki_valid --save-exact`
+  3. Compute perplexity with exact distance. `python rq/fast_evaluate.py --preset wiki_valid --exact`
+
+"""
+
 import argparse
 import collections
 import json
@@ -17,6 +26,8 @@ from vocab import Dictionary
 
 def argument_parser():
     parser = argparse.ArgumentParser()
+
+    # Filepaths.
     parser.add_argument('--vocab', default=None, type=str,
                         help='Path to vocab file.')
     parser.add_argument('--dstore', default=None, type=str,
@@ -27,18 +38,24 @@ def argument_parser():
     parser.add_argument('--eval-dstore-size', default=None, type=int)
     parser.add_argument('--eval-dstore-cache', default=None, type=str,
                         help='Path to additional evaluation information.')
-    parser.add_argument('--k', default=1024)
 
+    # Algorithm configuration.
+    parser.add_argument('--k', default=1024)
+    parser.add_argument('--exact', action='store_true',
+                        help='If set, then use the exact distances (these should be cached with --save-exact).')
+
+    # Commands.
+    parser.add_argument('--save-knns', action='store_true')
+    parser.add_argument('--save-exact', action='store_true')
+
+    # Preset configuration.
+    parser.add_argument('--preset', default=None, type=str,
+                        help='Use a preset configuration for different datasets.')
+
+    # Hardware specific.
     parser.add_argument('--load-pct', default=10, type=int,
                         help='Should be [0,100] corresponding to percent of keys to load in mem.')
     parser.add_argument('--cuda', action='store_true')
-
-    parser.add_argument('--exact', action='store_true',
-                        help='If set, then use the exact distances (these should be cached with --save-exact).')
-    parser.add_argument('--save-knns', action='store_true')
-    parser.add_argument('--save-exact', action='store_true')
-    parser.add_argument('--preset', default=None, type=str,
-                        help='Use a preset configuration for different datasets.')
 
     return parser
 
@@ -47,38 +64,28 @@ def set_presets(args):
     if args.preset is None:
         args.preset = 'ptb_valid'
 
+    if args.preset == 'wiki_valid':
+        args.vocab = 'data-bin/wikitext-103/dict.txt'
+        args.dstore = '/iesl/local/adrozdov/knnlm_data'
+        args.dstore_size = 103225485
+        args.eval_dstore = '/iesl/local/adrozdov/knnlm_data.valid'
+        args.eval_dstore_cache = '/iesl/local/adrozdov/knnlm_data.valid.cache'
+        args.eval_dstore_size = 217646
+
     if args.preset == 'ptb_valid':
         args.vocab = 'data-bin/ptb/dict.txt'
         args.dstore = './work_data/ptb.train'
-        args.dstore_size = 1001735
+        args.dstore_size = 1003610
         args.eval_dstore = './work_data/ptb.valid'
         args.eval_dstore_cache = './work_data/ptb.valid.cache'
-        args.eval_dstore_size = 42099
+        args.eval_dstore_size = 42355
 
     args.dstore_knn_index = f'{args.dstore}/knn.index'
 
 
-def eval_ppl(p):
-    return 2**(-p.mean()/np.log(2))
-
-
-def get_knn_prob(dstore, target, dists, knns, cuda=False):
-    if cuda:
-        device = torch.device('cuda:0')
-    else:
-        device = torch.device('cpu')
-
-    d = torch.from_numpy(dists).to(device).float()
-    probs = torch.log_softmax(d, -1)
-
-    index_mask = torch.eq(torch.from_numpy(dstore.vals[knns]).to(device).long().squeeze(-1), torch.from_numpy(target).to(device).long()).float()
-    index_mask[index_mask == 0] = -10000 # for stability
-    index_mask[index_mask == 1] = 0
-
-    log_prob = torch.logsumexp(probs + index_mask, dim=-1).cpu()
-
-    return log_prob
-
+#
+# Serialization Classes
+#
 
 class Dataset(object):
     def __init__(self, args):
@@ -87,10 +94,9 @@ class Dataset(object):
         dstore_size = args.eval_dstore_size
         self.query = np.memmap(f'{path}/dstore_keys.npy', dtype=np.float16, mode='r', shape=(dstore_size, 1024))
         self.target = np.memmap(f'{path}/dstore_vals.npy', dtype=np.int32, mode='r', shape=(dstore_size, 1))
-        #self.prob = np.memmap(f'{path}/dstore_prob.npy', dtype=np.float16, mode='r', shape=(dstore_size, 1))
+        self.prob = np.memmap(f'{path}/dstore_prob.npy', dtype=np.float16, mode='r', shape=(dstore_size, 1))
 
-        #for k in ['query', 'target', 'prob']:
-        for k in ['query', 'target']:
+        for k in ['query', 'target', 'prob']:
             v = getattr(self, k)
             new_v = np.ones(v.shape, dtype=v.dtype)
             new_v[:] = v
@@ -147,6 +153,10 @@ class Dstore(object):
         dists, knns = self.index.search(query, k)
         return dists, knns
 
+
+#
+# Serialization Methods
+#
 
 def save_knns(args, dataset, dstore):
     cache = collections.defaultdict(list)
@@ -235,6 +245,32 @@ def save_exact(args, dataset, dstore):
     time.sleep(1)
 
 
+#
+# Evaluation Methods
+#
+
+def eval_ppl(p):
+    return 2**(-p.mean()/np.log(2))
+
+
+def get_knn_prob(dstore, target, dists, knns, cuda=False):
+    if cuda:
+        device = torch.device('cuda:0')
+    else:
+        device = torch.device('cpu')
+
+    d = torch.from_numpy(dists).to(device).float()
+    probs = torch.log_softmax(d, -1)
+
+    index_mask = torch.eq(torch.from_numpy(dstore.vals[knns]).to(device).long().squeeze(-1), torch.from_numpy(target).to(device).long()).float()
+    index_mask[index_mask == 0] = -10000 # for stability
+    index_mask[index_mask == 1] = 0
+
+    log_prob = torch.logsumexp(probs + index_mask, dim=-1).cpu()
+
+    return log_prob
+
+
 def run_eval_ppl(context):
 
     # Local variables.
@@ -247,12 +283,32 @@ def run_eval_ppl(context):
     knns = dataset.knns
     dists = context['dists']
 
+    # LM perplexity.
     print('get_knn_prob')
     knn_prob = get_knn_prob(dstore, target, dists, knns).view(-1, 1)
     lm_prob = torch.from_numpy(dataset.prob).float()
     ppl = eval_ppl(lm_prob)
-    print(ppl)
 
+    # kNN-LM perplexity.
+    coeff_list = (np.arange(0, 100) / 100).tolist()
+    new_ppl_list = []
+    for coeff in tqdm(coeff_list, desc='coeff'):
+        def fn():
+            new_prob = dstore.combine_knn_and_vocab_probs(knn_prob, lm_prob, coeff)
+            return eval_ppl(new_prob)
+        new_ppl_list.append(fn())
+
+    # Print a window around the best perplexity.
+    topk = 5
+    for ix in sorted(np.argsort(new_ppl_list)[:topk]):
+        new_ppl = new_ppl_list[ix]
+        coeff = coeff_list[ix]
+        print(f'ppl = {ppl:.3f}, new_ppl = {new_ppl:.3f} ({coeff})')
+
+
+#
+# Main
+#
 
 def main(args):
     print('load dataset')
