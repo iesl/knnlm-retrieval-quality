@@ -22,6 +22,8 @@ This code is based on the original kNN-LM repo: https://github.com/urvashik/knnl
 }
 ```
 
+Contact Andrew Drozdov (adrozdov@cs.umass.edu) with any questions.
+
 ## Install Dependencies
 
 ```bash
