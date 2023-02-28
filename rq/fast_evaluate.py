@@ -15,13 +15,14 @@ import math
 import sys
 import time
 
-import faiss
 import numpy as np
 import torch
 
 from tqdm import tqdm
 
+from data_structures import Dataset, Dstore
 from vocab import Dictionary
+import knnlm_func
 
 
 def argument_parser():
@@ -38,6 +39,8 @@ def argument_parser():
     parser.add_argument('--eval-dstore-size', default=None, type=int)
     parser.add_argument('--eval-dstore-cache', default=None, type=str,
                         help='Path to additional evaluation information.')
+    parser.add_argument('--eval-external-knns', default=None, type=str,
+                        help='If set, then override the kNNs that would have been returned from faiss.')
 
     # Algorithm configuration.
     parser.add_argument('--k', default=1024)
@@ -81,77 +84,6 @@ def set_presets(args):
         args.eval_dstore_size = 42355
 
     args.dstore_knn_index = f'{args.dstore}/knn.index'
-
-
-#
-# Serialization Classes
-#
-
-class Dataset(object):
-    def __init__(self, args):
-        self.args = args
-        path = args.eval_dstore
-        dstore_size = args.eval_dstore_size
-        self.query = np.memmap(f'{path}/dstore_keys.npy', dtype=np.float16, mode='r', shape=(dstore_size, 1024))
-        self.target = np.memmap(f'{path}/dstore_vals.npy', dtype=np.int32, mode='r', shape=(dstore_size, 1))
-        self.prob = np.memmap(f'{path}/dstore_prob.npy', dtype=np.float16, mode='r', shape=(dstore_size, 1))
-
-        for k in ['query', 'target', 'prob']:
-            v = getattr(self, k)
-            new_v = np.ones(v.shape, dtype=v.dtype)
-            new_v[:] = v
-            setattr(self, k, new_v)
-
-    def load_cache(self):
-        args = self.args
-        path = args.eval_dstore_cache
-        dstore_size = args.eval_dstore_size
-        self.dists = np.memmap(f'{path}/dstore_cache_dists.npy', dtype=np.float32, mode='r', shape=(dstore_size, 1024))
-        self.knns = np.memmap(f'{path}/dstore_cache_knns.npy', dtype=np.int32, mode='r', shape=(dstore_size, 1024))
-
-    def load_exact_dists(self):
-        args = self.args
-        path = args.eval_dstore_cache
-        dstore_size = args.eval_dstore_size
-        filename = f'{path}/dstore_cache_exact_dists.npy'
-        assert os.path.exists(filename)
-        self.exact_dists = np.memmap(filename, dtype=np.float32, mode='r', shape=(dstore_size, 1024))
-
-
-class Dstore(object):
-    def __init__(self, args):
-        path = args.dstore
-        dstore_size = args.dstore_size
-
-        self.sim_func = 'do_not_recomp_l2'
-        self.k = 1024
-
-        self.keys = np.memmap(f'{path}/dstore_keys.npy', dtype=np.float16, mode='r', shape=(dstore_size, 1024))
-        self.vals = np.memmap(f'{path}/dstore_vals.npy', dtype=np.int32, mode='r', shape=(dstore_size, 1))
-
-        print('load index')
-        indexfile = args.dstore_knn_index
-        self.index = faiss.read_index(indexfile, faiss.IO_FLAG_ONDISK_SAME_DIR)
-
-        self.half = True
-        self.metric_type = 'l2'
-
-    def combine_knn_and_vocab_probs(self, knn_p, vocab_p, coeff):
-        combine_probs = torch.stack([vocab_p, knn_p], dim=0)
-        coeffs = torch.ones_like(combine_probs)
-        coeffs[0] = np.log(1 - coeff)
-        coeffs[1] = np.log(coeff)
-        curr_prob = torch.logsumexp(combine_probs + coeffs, dim=0)
-
-        return curr_prob
-
-    def get_knns(self, query, k=None):
-        if k is None:
-            k = self.k
-        if query.dtype == np.float16:
-            query = query.astype(np.float32)
-        dists, knns = self.index.search(query, k)
-        return dists, knns
 
 
 #
@@ -246,67 +178,6 @@ def save_exact(args, dataset, dstore):
 
 
 #
-# Evaluation Methods
-#
-
-def eval_ppl(p):
-    return 2**(-p.mean()/np.log(2))
-
-
-def get_knn_prob(dstore, target, dists, knns, cuda=False):
-    if cuda:
-        device = torch.device('cuda:0')
-    else:
-        device = torch.device('cpu')
-
-    d = torch.from_numpy(dists).to(device).float()
-    probs = torch.log_softmax(d, -1)
-
-    index_mask = torch.eq(torch.from_numpy(dstore.vals[knns]).to(device).long().squeeze(-1), torch.from_numpy(target).to(device).long()).float()
-    index_mask[index_mask == 0] = -10000 # for stability
-    index_mask[index_mask == 1] = 0
-
-    log_prob = torch.logsumexp(probs + index_mask, dim=-1).cpu()
-
-    return log_prob
-
-
-def run_eval_ppl(context):
-
-    # Local variables.
-    dstore = context['dstore']
-    keys = dstore.keys
-    vals = dstore.vals
-    dataset = context['dataset']
-    query = dataset.query
-    target = dataset.target
-    knns = dataset.knns
-    dists = context['dists']
-
-    # LM perplexity.
-    print('get_knn_prob')
-    knn_prob = get_knn_prob(dstore, target, dists, knns).view(-1, 1)
-    lm_prob = torch.from_numpy(dataset.prob).float()
-    ppl = eval_ppl(lm_prob)
-
-    # kNN-LM perplexity.
-    coeff_list = (np.arange(0, 100) / 100).tolist()
-    new_ppl_list = []
-    for coeff in tqdm(coeff_list, desc='coeff'):
-        def fn():
-            new_prob = dstore.combine_knn_and_vocab_probs(knn_prob, lm_prob, coeff)
-            return eval_ppl(new_prob)
-        new_ppl_list.append(fn())
-
-    # Print a window around the best perplexity.
-    topk = 5
-    for ix in sorted(np.argsort(new_ppl_list)[:topk]):
-        new_ppl = new_ppl_list[ix]
-        coeff = coeff_list[ix]
-        print(f'ppl = {ppl:.3f}, new_ppl = {new_ppl:.3f} ({coeff})')
-
-
-#
 # Main
 #
 
@@ -350,7 +221,7 @@ def main(args):
     context['dataset'] = dataset
     context['dists'] = dists
 
-    run_eval_ppl(context)
+    knnlm_func.run_eval_ppl(context)
 
 
 if __name__ == '__main__':
